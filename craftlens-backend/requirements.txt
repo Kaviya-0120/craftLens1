@@ -1,4 +1,4 @@
-python -m pip install -r requirements.txt# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # CraftLens Backend — compatible with Python 3.12 / 3.13
 # Tested with Anaconda Python 3.13 on macOS (Apple Silicon + Intel)
 # ─────────────────────────────────────────────────────────────
