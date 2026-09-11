@@ -1,0 +1,48 @@
+python -m pip install -r requirements.txt# ─────────────────────────────────────────────────────────────
+# CraftLens Backend — compatible with Python 3.12 / 3.13
+# Tested with Anaconda Python 3.13 on macOS (Apple Silicon + Intel)
+# ─────────────────────────────────────────────────────────────
+
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+
+# Config / settings
+pydantic-settings==2.2.1
+pydantic==2.7.1
+python-dotenv==1.0.1
+
+# ── Phase 1: ASR ──────────────────────────────────────────────
+# Do NOT pin openai-whisper — old versions use pkg_resources which
+# was removed from Python 3.13's stdlib. Latest release works fine.
+openai-whisper>=20240930
+# torch: let pip resolve the right wheel for your CPU/GPU
+torch>=2.1.0
+# ffmpeg-python lets Whisper decode webm / m4a
+ffmpeg-python==0.2.0
+
+# ── Phase 1: LLM ──────────────────────────────────────────────
+groq>=0.9.0
+google-generativeai>=0.7.0        # Gemini free-tier fallback
+httpx>=0.27.0                     # Ollama REST calls
+
+# ── Phase 3: Image pipeline ───────────────────────────────────
+rembg[gpu]>=2.0.56                # falls back to CPU if no GPU
+onnxruntime>=1.17.0               # required by rembg on CPU (macOS/Linux)
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+aiofiles>=23.2.1
+
+# ── Phase 4 / 6: Pricing + consistency embeddings ─────────────
+sentence-transformers>=2.7.0
+faiss-cpu>=1.7.4
+pandas>=2.1.0
+numpy>=1.26.0
+
+# ── Phase 6: CLIP visual tagging ─────────────────────────────
+open-clip-torch>=2.20.0
+
+# ── Phase 8: Persistence ──────────────────────────────────────
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0
