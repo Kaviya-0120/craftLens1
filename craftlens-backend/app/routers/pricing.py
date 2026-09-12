@@ -45,6 +45,20 @@ router = APIRouter(prefix="/pricing", tags=["Pricing Engine"])
     ),
 )
 async def estimate_price(body: PricingEstimateRequest):
+    from app.config import settings
+    
+    # Check if pricing is enabled
+    if not settings.pricing_enabled:
+        # Return mock pricing data for free tier
+        logger.info("Pricing disabled - returning mock data")
+        return PricingEstimateResponse(
+            price_range=[500.0, 5000.0],
+            median_price=2500.0,
+            comparable_count=0,
+            comparable_samples=[],
+            low_confidence=True,
+        )
+    
     try:
         result = pricing_service.estimate_price(
             fields=body.fields.model_dump(),

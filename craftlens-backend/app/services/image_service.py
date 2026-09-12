@@ -39,62 +39,88 @@ def validate_image_file(filename: str, size_bytes: int) -> None:
 
 
 def _remove_background(image_bytes: bytes) -> bytes:
-    """Run rembg with isnet-general-use model. Returns PNG bytes."""
+    """
+    Lightweight image processing - skip background removal for free tier.
+    Just optimize the image for web display.
+    """
     try:
-        from rembg import remove, new_session  # type: ignore
-    except (ImportError, SystemExit) as e:
-        raise RuntimeError(
-            "rembg failed to load. Ensure onnxruntime is installed: "
-            "pip install onnxruntime"
-        ) from e
-
-    logger.info("rembg: removing background (model=isnet-general-use)…")
-    # new_session() downloads model weights (~170 MB) on first call — expected
-    try:
-        session = new_session("isnet-general-use")
-        result: bytes = remove(image_bytes, session=session)
-    except SystemExit as e:
-        raise RuntimeError(
-            "rembg exited unexpectedly. This usually means onnxruntime is missing "
-            "or the model failed to download. Check server logs."
-        ) from e
-    logger.info("rembg: background removed (%d bytes out).", len(result))
-    return result
+        from PIL import Image, ImageEnhance
+        import io
+        
+        logger.info("Processing image (lightweight mode - no background removal)")
+        
+        # Decode image
+        pil_img = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert to RGB if needed
+        if pil_img.mode in ('RGBA', 'P'):
+            pil_img = pil_img.convert('RGB')
+        
+        # Enhance contrast slightly
+        enhancer = ImageEnhance.Contrast(pil_img)
+        pil_img = enhancer.enhance(1.1)
+        
+        # Optimize size for web
+        max_size = (1200, 1200)
+        pil_img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        
+        # Save as PNG
+        buf = io.BytesIO()
+        pil_img.save(buf, format="PNG", optimize=True)
+        result = buf.getvalue()
+        
+        logger.info("Image processed (%d bytes out).", len(result))
+        return result
+    except Exception as e:
+        logger.warning(f"Image processing failed: {e} - using original")
+        return image_bytes
 
 
 def _apply_clahe(image_bytes: bytes) -> bytes:
-    """Apply CLAHE lighting correction on the L channel in LAB colour space."""
-    import cv2  # type: ignore
-    import numpy as np
-    from PIL import Image
-    import io
+    """
+    Apply basic brightness and contrast enhancement using Pillow.
+    Lightweight alternative to OpenCV CLAHE.
+    """
+    try:
+        from PIL import Image, ImageEnhance
+        import io
 
-    # Decode PNG bytes (may have alpha from rembg)
-    pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        # Decode image
+        pil_img = Image.open(io.BytesIO(image_bytes))
+        
+        # Ensure RGB
+        if pil_img.mode == 'RGBA':
+            # Preserve alpha if present
+            alpha = pil_img.split()[3]
+            rgb = pil_img.convert('RGB')
+            
+            # Enhance
+            enhancer = ImageEnhance.Brightness(rgb)
+            rgb = enhancer.enhance(1.15)
+            enhancer = ImageEnhance.Contrast(rgb)
+            rgb = enhancer.enhance(1.1)
+            
+            # Re-apply alpha
+            rgb = rgb.convert('RGBA')
+            rgb.putalpha(alpha)
+            result_pil = rgb
+        else:
+            # Simple enhancement for RGB/L
+            if pil_img.mode != 'RGB':
+                pil_img = pil_img.convert('RGB')
+            
+            enhancer = ImageEnhance.Brightness(pil_img)
+            result_pil = enhancer.enhance(1.15)
+            enhancer = ImageEnhance.Contrast(result_pil)
+            result_pil = enhancer.enhance(1.1)
 
-    # Work on the RGB channels only
-    rgb = np.array(pil_img.convert("RGB"))
-
-    # Convert to LAB
-    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
-    l_ch, a_ch, b_ch = cv2.split(lab)
-
-    # CLAHE on L channel
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l_enhanced = clahe.apply(l_ch)
-
-    # Merge and convert back
-    lab_enhanced = cv2.merge([l_enhanced, a_ch, b_ch])
-    rgb_enhanced = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2RGB)
-
-    # Re-apply original alpha channel
-    alpha = np.array(pil_img.split()[3])
-    result_pil = Image.fromarray(rgb_enhanced)
-    result_pil.putalpha(Image.fromarray(alpha))
-
-    buf = io.BytesIO()
-    result_pil.save(buf, format="PNG")
-    return buf.getvalue()
+        # Save as PNG
+        buf = io.BytesIO()
+        result_pil.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"Image enhancement failed: {e} - using original")
+        return image_bytes
 
 
 def process_image(image_bytes: bytes, filename: str) -> ProcessedImageResult:
