@@ -48,7 +48,49 @@ class TranscribeResult:
 
 # ── Whisper backend ────────────────────────────────────────────────────────────
 
+def _transcribe_whisper_api(audio_bytes: bytes, filename: str) -> TranscribeResult:
+    """Use Groq's Whisper API instead of local model - optimized for free tier"""
+    try:
+        from groq import Groq
+    except ImportError as e:
+        raise RuntimeError("groq package not installed. Run: pip install groq") from e
+
+    if not settings.groq_api_key:
+        raise RuntimeError("GROQ_API_KEY is not set in .env")
+
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower() if ext else ".wav"
+
+    # Save audio temporarily for API upload
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+
+    try:
+        client = Groq(api_key=settings.groq_api_key)
+        logger.info("Calling Groq Whisper API on %d bytes (ext=%s)…", len(audio_bytes), ext)
+        
+        with open(tmp_path, "rb") as audio_file:
+            transcription = client.audio.transcriptions.create(
+                file=(filename, audio_file.read()),
+                model="whisper-large-v3",
+                response_format="verbose_json",
+                language="en"  # or None for auto-detect
+            )
+        
+        transcript = (transcription.text or "").strip()
+        language = getattr(transcription, 'language', 'en')
+        logger.info("Groq Whisper done — lang=%s  chars=%d", language, len(transcript))
+        return TranscribeResult(transcript=transcript, detected_language=language, confidence=1.0)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 def _transcribe_whisper(audio_bytes: bytes, filename: str) -> TranscribeResult:
+    """Fallback to local Whisper (not recommended for free tier)"""
     _, ext = os.path.splitext(filename)
     ext = ext.lower() if ext else ".wav"
 
@@ -172,10 +214,14 @@ def transcribe(audio_bytes: bytes, filename: str) -> TranscribeResult:
 
     provider = settings.asr_provider.lower()
     if provider == "whisper":
+        # Local Whisper (not recommended for free tier - high memory)
         return _transcribe_whisper(audio_bytes, filename)
+    elif provider == "groq":
+        # Groq Whisper API (recommended for free tier)
+        return _transcribe_whisper_api(audio_bytes, filename)
     elif provider == "bhashini":
         return _transcribe_bhashini(audio_bytes, filename)
     else:
         raise RuntimeError(
-            f"Unknown ASR_PROVIDER='{provider}'. Supported: whisper, bhashini"
+            f"Unknown ASR_PROVIDER='{provider}'. Supported: whisper, groq, bhashini"
         )

@@ -39,62 +39,76 @@ def validate_image_file(filename: str, size_bytes: int) -> None:
 
 
 def _remove_background(image_bytes: bytes) -> bytes:
-    """Run rembg with isnet-general-use model. Returns PNG bytes."""
+    """
+    Remove background using remove.bg API (optimized for free tier).
+    Falls back to no removal if API key not set.
+    """
+    if not settings.removebg_api_key:
+        logger.warning("REMOVEBG_API_KEY not set - skipping background removal")
+        return image_bytes
+    
     try:
-        from rembg import remove, new_session  # type: ignore
-    except (ImportError, SystemExit) as e:
-        raise RuntimeError(
-            "rembg failed to load. Ensure onnxruntime is installed: "
-            "pip install onnxruntime"
-        ) from e
-
-    logger.info("rembg: removing background (model=isnet-general-use)…")
-    # new_session() downloads model weights (~170 MB) on first call — expected
-    try:
-        session = new_session("isnet-general-use")
-        result: bytes = remove(image_bytes, session=session)
-    except SystemExit as e:
-        raise RuntimeError(
-            "rembg exited unexpectedly. This usually means onnxruntime is missing "
-            "or the model failed to download. Check server logs."
-        ) from e
-    logger.info("rembg: background removed (%d bytes out).", len(result))
-    return result
+        import requests
+        logger.info("remove.bg: removing background via API…")
+        
+        response = requests.post(
+            'https://api.remove.bg/v1.0/removebg',
+            files={'image_file': image_bytes},
+            data={'size': 'auto'},
+            headers={'X-Api-Key': settings.removebg_api_key},
+            timeout=30
+        )
+        response.raise_for_status()
+        logger.info("remove.bg: background removed (%d bytes out).", len(response.content))
+        return response.content
+    except Exception as e:
+        logger.error(f"remove.bg API failed: {e} - using original image")
+        return image_bytes
 
 
 def _apply_clahe(image_bytes: bytes) -> bytes:
-    """Apply CLAHE lighting correction on the L channel in LAB colour space."""
-    import cv2  # type: ignore
-    import numpy as np
-    from PIL import Image
-    import io
+    """
+    Apply basic brightness enhancement using Pillow (lightweight).
+    Replaces OpenCV CLAHE to reduce dependencies.
+    """
+    try:
+        from PIL import Image, ImageEnhance
+        import io
 
-    # Decode PNG bytes (may have alpha from rembg)
-    pil_img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+        # Decode image
+        pil_img = Image.open(io.BytesIO(image_bytes))
+        
+        # Convert to RGB if needed
+        if pil_img.mode in ('RGBA', 'LA'):
+            # Preserve alpha channel
+            alpha = pil_img.split()[-1] if pil_img.mode == 'RGBA' else None
+            rgb = pil_img.convert('RGB')
+            
+            # Enhance brightness and contrast
+            enhancer = ImageEnhance.Brightness(rgb)
+            rgb = enhancer.enhance(1.2)
+            enhancer = ImageEnhance.Contrast(rgb)
+            rgb = enhancer.enhance(1.1)
+            
+            # Re-apply alpha if exists
+            if alpha:
+                rgb = rgb.convert('RGBA')
+                rgb.putalpha(alpha)
+            result_pil = rgb
+        else:
+            # Simple enhancement for RGB/L images
+            enhancer = ImageEnhance.Brightness(pil_img)
+            result_pil = enhancer.enhance(1.2)
+            enhancer = ImageEnhance.Contrast(result_pil)
+            result_pil = enhancer.enhance(1.1)
 
-    # Work on the RGB channels only
-    rgb = np.array(pil_img.convert("RGB"))
-
-    # Convert to LAB
-    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
-    l_ch, a_ch, b_ch = cv2.split(lab)
-
-    # CLAHE on L channel
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l_enhanced = clahe.apply(l_ch)
-
-    # Merge and convert back
-    lab_enhanced = cv2.merge([l_enhanced, a_ch, b_ch])
-    rgb_enhanced = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2RGB)
-
-    # Re-apply original alpha channel
-    alpha = np.array(pil_img.split()[3])
-    result_pil = Image.fromarray(rgb_enhanced)
-    result_pil.putalpha(Image.fromarray(alpha))
-
-    buf = io.BytesIO()
-    result_pil.save(buf, format="PNG")
-    return buf.getvalue()
+        # Save as PNG
+        buf = io.BytesIO()
+        result_pil.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception as e:
+        logger.warning(f"Image enhancement failed: {e} - using original")
+        return image_bytes
 
 
 def process_image(image_bytes: bytes, filename: str) -> ProcessedImageResult:

@@ -39,14 +39,18 @@ class Settings(BaseSettings):
     ollama_model: str = Field(default="llama3", alias="OLLAMA_MODEL")
 
     # ── ASR ──────────────────────────────────────────────────
-    asr_provider: str = Field(default="whisper", alias="ASR_PROVIDER")
+    asr_provider: str = Field(default="groq", alias="ASR_PROVIDER")  # Options: whisper, groq, bhashini
     whisper_model_size: str = Field(default="base", alias="WHISPER_MODEL_SIZE")
 
     bhashini_api_key: str = Field(default="", alias="BHASHINI_API_KEY")
     bhashini_user_id: str = Field(default="", alias="BHASHINI_USER_ID")
     bhashini_pipeline_id: str = Field(default="", alias="BHASHINI_PIPELINE_ID")
+    
+    # ── Image Processing ─────────────────────────────────────
+    removebg_api_key: str = Field(default="", alias="REMOVEBG_API_KEY")  # Optional: remove.bg API
 
     # ── Pricing / FAISS ──────────────────────────────────────
+    pricing_enabled: bool = Field(default=False, alias="PRICING_ENABLED")  # Disable for free tier
     price_index_path: str = Field(default="./data/price_index.faiss", alias="PRICE_INDEX_PATH")
     price_metadata_path: str = Field(default="./data/price_metadata.csv", alias="PRICE_METADATA_PATH")
     embedding_model: str = Field(default="all-MiniLM-L6-v2", alias="EMBEDDING_MODEL")
